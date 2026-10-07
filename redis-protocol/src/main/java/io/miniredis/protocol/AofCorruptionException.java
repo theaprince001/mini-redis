@@ -1,4 +1,4 @@
-﻿package io.miniredis.protocol;
+package io.miniredis.protocol;
 
 public class AofCorruptionException extends RuntimeException {
     public AofCorruptionException(String message) {

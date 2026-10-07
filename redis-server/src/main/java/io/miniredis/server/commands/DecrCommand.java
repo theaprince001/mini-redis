@@ -6,10 +6,9 @@ import io.miniredis.protocol.RespValue;
 
 import java.util.List;
 
-public final class QuitCommand implements Command {
+public final class DecrCommand implements Command {
     @Override
     public RespValue execute(CommandContext ctx, List<RespValue> args) {
-        ctx.session().requestClose();
-        return new RespValue.SimpleString("OK");
+        return IncrCommand.incrBy(ctx, args, -1L);
     }
 }

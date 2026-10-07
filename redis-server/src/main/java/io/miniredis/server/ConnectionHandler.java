@@ -1,5 +1,6 @@
-﻿package io.miniredis.server;
+package io.miniredis.server;
 
+import io.miniredis.core.CommandContext;
 import io.miniredis.protocol.RespProtocolException;
 import io.miniredis.protocol.RespValue;
 import io.netty.buffer.Unpooled;
@@ -13,26 +14,23 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeUnit;
 
-public final class CommandHandler extends SimpleChannelInboundHandler<RespValue.Array> {
+public final class ConnectionHandler extends SimpleChannelInboundHandler<RespValue.Array> {
 
-    private static final Logger log = LoggerFactory.getLogger(CommandHandler.class);
+    private static final Logger log = LoggerFactory.getLogger(ConnectionHandler.class);
 
-    private final CommandDispatcher dispatcher;
-    private final long stallTimeoutMs;
+    private final ServerState state;
 
-    private Session session;
+    private NettySession session;
     private ScheduledFuture<?> stallTimer;
     private boolean errorSent;
 
-    public CommandHandler(CommandDispatcher dispatcher, long stallTimeoutMs) {
-        this.dispatcher = dispatcher;
-        this.stallTimeoutMs = stallTimeoutMs;
+    public ConnectionHandler(ServerState state) {
+        this.state = state;
     }
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
-        session = new Session(ctx.channel());
-        log.debug("Client connected: {}", ctx.channel().remoteAddress());
+        session = new NettySession(ctx.channel());
     }
 
     @Override
@@ -46,9 +44,13 @@ public final class CommandHandler extends SimpleChannelInboundHandler<RespValue.
         if (errorSent) return;
         if (session.isCloseRequested()) return;
 
+        long now = state.clock().currentTimeMillis();
+        CommandContext cmdCtx = new CommandContext(
+                state.store(), session, state.propagator(), state.config(), now);
+
         RespValue reply;
         try {
-            reply = dispatcher.dispatch(msg, session);
+            reply = state.dispatcher().dispatch(cmdCtx, msg);
         } catch (Throwable t) {
             log.warn("Command failed", t);
             reply = new RespValue.Error("ERR internal error");
@@ -76,17 +78,14 @@ public final class CommandHandler extends SimpleChannelInboundHandler<RespValue.
             stallTimer = ctx.executor().schedule(() -> {
                 log.warn("Closing stalled client {}", ctx.channel().remoteAddress());
                 ctx.close();
-            }, stallTimeoutMs, TimeUnit.MILLISECONDS);
+            }, state.stallTimeoutMs(), TimeUnit.MILLISECONDS);
         }
         ctx.fireChannelWritabilityChanged();
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        if (errorSent) {
-            ctx.close();
-            return;
-        }
+        if (errorSent) { ctx.close(); return; }
 
         Throwable root = (cause instanceof DecoderException && cause.getCause() != null)
                 ? cause.getCause() : cause;

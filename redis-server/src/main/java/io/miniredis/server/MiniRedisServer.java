@@ -1,11 +1,13 @@
-﻿package io.miniredis.server;
+package io.miniredis.server;
 
-import io.miniredis.protocol.RespProtocolException;
+import io.miniredis.core.Clock;
+import io.miniredis.core.Config;
+import io.miniredis.core.MiniRedisStore;
+import io.miniredis.core.Propagator;
+import io.miniredis.core.SystemClock;
 import io.miniredis.protocol.RespParser;
+import io.miniredis.protocol.RespProtocolException;
 import io.miniredis.protocol.RespValue;
-import io.miniredis.server.commands.EchoCommand;
-import io.miniredis.server.commands.PingCommand;
-import io.miniredis.server.commands.QuitCommand;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
@@ -29,7 +31,7 @@ public final class MiniRedisServer {
 
     public static final long DEFAULT_CLIENT_OUTBOUND_HARD_LIMIT = 32L * 1024 * 1024;
     public static final long DEFAULT_STALL_TIMEOUT_MS           = 30_000L;
-    public static final int  DEFAULT_SO_SNDBUF                  = 0;   // 0 = OS default
+    public static final int  DEFAULT_SO_SNDBUF                  = 0;
     public static final int  DEFAULT_MAX_QUERY_BUFFER           = 16 * 1024 * 1024;
 
     private static final int WATERMARK_LOW  = 64 * 1024;
@@ -42,6 +44,10 @@ public final class MiniRedisServer {
     private final int  maxQueryBuffer;
 
     private final CommandDispatcher dispatcher;
+    private final MiniRedisStore store;
+    private final Propagator propagator;
+    private final Config config;
+    private final Clock clock;
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
@@ -72,15 +78,26 @@ public final class MiniRedisServer {
         this.soSndBuf = soSndBuf;
         this.maxQueryBuffer = maxQueryBuffer;
 
+        this.store = new MiniRedisStore();
+        this.propagator = Propagator.NoOp.INSTANCE;
+        this.config = new Config();
+        this.clock = SystemClock.INSTANCE;
+
         this.dispatcher = new CommandDispatcher();
-        dispatcher.register("PING", new PingCommand());
-        dispatcher.register("ECHO", new EchoCommand());
-        dispatcher.register("QUIT", new QuitCommand());
+        Commands.registerAll(dispatcher);
     }
 
     public void start() throws InterruptedException {
         bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("mini-redis-boss"));
         workerGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("mini-redis-worker"));
+
+        // Capture the worker thread so the store can enforce single-threaded access.
+        workerGroup.next()
+                .submit(() -> store.setOwnerThread(Thread.currentThread()))
+                .syncUninterruptibly();
+
+        final ServerState state = new ServerState(
+                dispatcher, store, propagator, config, clock, stallTimeoutMs);
 
         ServerBootstrap b = new ServerBootstrap();
         b.group(bossGroup, workerGroup)
@@ -93,8 +110,7 @@ public final class MiniRedisServer {
                         p.addLast("outboundCounter",
                                 new OutboundByteCounter(clientOutboundHardLimit));
                         p.addLast("respEncoder", new RespFrameEncoder());
-                        p.addLast("commandHandler",
-                                new CommandHandler(dispatcher, stallTimeoutMs));
+                        p.addLast("connectionHandler", new ConnectionHandler(state));
                     }
                 })
                 .childOption(ChannelOption.TCP_NODELAY, true)
@@ -143,14 +159,11 @@ public final class MiniRedisServer {
         server.closeFuture().sync();
     }
 
-    /** Client requests are flat arrays of bulk strings. */
     static final class RespFrameDecoder extends ByteToMessageDecoder {
 
         private final int maxQueryBuffer;
 
-        RespFrameDecoder(int maxQueryBuffer) {
-            this.maxQueryBuffer = maxQueryBuffer;
-        }
+        RespFrameDecoder(int maxQueryBuffer) { this.maxQueryBuffer = maxQueryBuffer; }
 
         @Override
         protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {

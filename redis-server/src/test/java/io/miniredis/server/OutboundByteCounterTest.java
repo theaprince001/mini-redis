@@ -1,4 +1,4 @@
-﻿package io.miniredis.server;
+package io.miniredis.server;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;

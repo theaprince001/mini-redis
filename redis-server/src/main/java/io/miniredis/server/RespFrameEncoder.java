@@ -1,2 +1,2 @@
-﻿package io.miniredis.server;
+package io.miniredis.server;
 public class RespFrameEncoder {}

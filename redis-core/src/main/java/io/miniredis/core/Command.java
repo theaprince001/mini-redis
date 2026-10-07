@@ -1,9 +1,9 @@
-﻿package io.miniredis.server;
+package io.miniredis.core;
 
 import io.miniredis.protocol.RespValue;
 
 import java.util.List;
 
 public interface Command {
-    RespValue execute(List<RespValue> args, Session session);
+    RespValue execute(CommandContext ctx, List<RespValue> args);
 }

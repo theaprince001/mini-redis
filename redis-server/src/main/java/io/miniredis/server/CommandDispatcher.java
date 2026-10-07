@@ -1,8 +1,12 @@
-﻿package io.miniredis.server;
+package io.miniredis.server;
 
+import io.miniredis.core.Command;
+import io.miniredis.core.CommandContext;
+import io.miniredis.core.CommandSpec;
 import io.miniredis.protocol.RespValue;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -11,31 +15,29 @@ import java.util.Map;
 public final class CommandDispatcher {
 
     private static final int MAX_COMMAND_NAME_LEN = 64;
-    private static final int MAX_ECHOED_NAME      = 128;
+    private static final int MAX_ECHOED_NAME = 128;
 
-    private final Map<String, Command> commands = new HashMap<>();
+    public record Registered(CommandSpec spec, Command command) {}
 
-    public void register(String name, Command command) {
-        commands.put(name.toUpperCase(Locale.ROOT), command);
+    private final Map<String, Registered> registry = new HashMap<>();
+
+    public void register(CommandSpec spec, Command command) {
+        registry.put(spec.name().toUpperCase(Locale.ROOT), new Registered(spec, command));
     }
 
-    public RespValue dispatch(RespValue.Array request, Session session) {
+    public Collection<Registered> all() { return registry.values(); }
+
+    public RespValue dispatch(CommandContext ctx, RespValue.Array request) {
         List<RespValue> args = request.values();
         if (args.isEmpty()) return new RespValue.Error("ERR empty command");
 
         if (!(args.get(0) instanceof RespValue.Bulk nameBulk)) {
             return new RespValue.Error("ERR command name must be a bulk string");
         }
-
         byte[] raw = nameBulk.value();
-
-        // No registered command name is longer than this. Skip String
-        // allocation and map lookup for oversized input.
         if (raw.length == 0 || raw.length > MAX_COMMAND_NAME_LEN) {
             return unknownCommand(raw);
         }
-
-        // Strict ASCII name filter. Rejects controls and non-letters early.
         for (byte b : raw) {
             int c = b & 0xFF;
             boolean ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
@@ -43,9 +45,16 @@ public final class CommandDispatcher {
         }
 
         String name = new String(raw, StandardCharsets.US_ASCII).toUpperCase(Locale.ROOT);
-        Command cmd = commands.get(name);
-        if (cmd == null) return unknownCommand(raw);
-        return cmd.execute(args, session);
+        Registered r = registry.get(name);
+        if (r == null) return unknownCommand(raw);
+
+        if (!r.spec.acceptsArgCount(args.size())) {
+            return new RespValue.Error(
+                    "ERR wrong number of arguments for '" + name.toLowerCase(Locale.ROOT)
+                            + "' command");
+        }
+
+        return r.command.execute(ctx, args);
     }
 
     private static RespValue unknownCommand(byte[] raw) {

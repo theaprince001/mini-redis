@@ -1,2 +1,3 @@
 ﻿rootProject.name = "mini-redis"
-include("redis-protocol", "redis-server")
+include("redis-protocol", "redis-core", "redis-server")
+

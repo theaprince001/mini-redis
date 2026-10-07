@@ -1,4 +1,4 @@
-﻿package io.miniredis.protocol;
+package io.miniredis.protocol;
 
 import java.util.Arrays;
 import java.util.List;

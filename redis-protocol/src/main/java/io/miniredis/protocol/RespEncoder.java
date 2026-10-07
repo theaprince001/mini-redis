@@ -1,4 +1,4 @@
-﻿package io.miniredis.protocol;
+package io.miniredis.protocol;
 
 import io.netty.buffer.ByteBuf;
 
@@ -57,12 +57,26 @@ public final class RespEncoder {
         }
     }
 
+    /** Safely writes long values to the buffer in ASCII without overflow issues. */
     private static void writeLongAscii(ByteBuf out, long v) {
-        if (v == 0) { out.writeByte('0'); return; }
-        if (v < 0) { out.writeByte('-'); v = -v; }
-        int digits = 1;
+        if (v == Long.MIN_VALUE) {
+            out.writeBytes("-9223372036854775808".getBytes(StandardCharsets.US_ASCII));
+            return;
+        }
+        if (v == 0) {
+            out.writeByte('0');
+            return;
+        }
+        if (v < 0) {
+            out.writeByte('-');
+            v = -v;
+        }
+        int digits = 0;
         long tmp = v;
-        while (tmp >= 10) { digits++; tmp /= 10; }
+        while (tmp > 0) {
+            digits++;
+            tmp /= 10;
+        }
         int writerIdx = out.writerIndex();
         out.ensureWritable(digits);
         for (int i = digits - 1; i >= 0; i--) {
