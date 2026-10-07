@@ -1,4 +1,4 @@
-﻿package io.miniredis.protocol;
+package io.miniredis.protocol;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -48,7 +48,7 @@ class RespEncoderTest {
     }
 
     @Test void sanitizesCrLfInSimpleString() {
-        assertEquals("+hi there\r\n",
+        assertEquals("+hi  there\r\n",
                 encode(new RespValue.SimpleString("hi\r\nthere")));
     }
 

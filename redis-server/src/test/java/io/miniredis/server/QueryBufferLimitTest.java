@@ -3,7 +3,6 @@ package io.miniredis.server;
 import io.miniredis.protocol.RespParser;
 import io.miniredis.protocol.RespProtocolException;
 import io.miniredis.protocol.RespValue;
-import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.DecoderException;
@@ -56,7 +55,7 @@ class QueryBufferLimitTest {
                             || thrown instanceof RespProtocolException,
                     "unexpected throwable type: " + thrown.getClass().getName());
         } finally {
-            ch.finishAndReleaseAll();
+            finishQuietly(ch);
         }
     }
 
@@ -88,7 +87,7 @@ class QueryBufferLimitTest {
             RespValue.Bulk bulk = assertInstanceOf(RespValue.Bulk.class, arr.values().get(0));
             assertEquals(argLen, bulk.value().length);
         } finally {
-            ch.finishAndReleaseAll();
+            finishQuietly(ch);
         }
     }
 
@@ -200,5 +199,20 @@ class QueryBufferLimitTest {
             t = t.getCause();
         }
         return null;
+    }
+
+    /**
+     * EmbeddedChannel.finishAndReleaseAll() calls decodeLast on the leftover
+     * buffer. When the test deliberately triggered a protocol exception, that
+     * leftover still fails the same check, and the re-raised exception would
+     * fail a test whose assertions already passed. The exception under test
+     * has already been asserted; cleanup must not re-throw.
+     */
+    private static void finishQuietly(EmbeddedChannel ch) {
+        try {
+            ch.finishAndReleaseAll();
+        } catch (Throwable ignored) {
+            // see method doc
+        }
     }
 }

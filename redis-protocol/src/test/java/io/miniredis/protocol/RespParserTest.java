@@ -1,4 +1,4 @@
-﻿package io.miniredis.protocol;
+package io.miniredis.protocol;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -90,7 +90,7 @@ class RespParserTest {
     @Test void returnsNullOnPartialBulkBody() {
         ByteBuf b = buf("$5\r\nhel");
         assertNull(RespParser.parse(b));
-        assertEquals(8, b.readableBytes());
+        assertEquals(7, b.readableBytes());
     }
 
     @Test void returnsNullOnPartialArray() {
